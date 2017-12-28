@@ -22,10 +22,14 @@ namespace SamplePlugin
 
         private async Task BackgroundTask()
         {
+            var counter = 0;
             while (!_stopping)
             {
                 await Task.Delay(TimeSpan.FromSeconds(1));
                 logger.LogInformation("MyServiceD is doing background work.");
+                counter++;
+                if (counter > 10)
+                    throw new DivideByZeroException("тестирование");
             }
 
             logger.LogInformation("MyServiceD background task is stopping.");

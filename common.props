@@ -4,7 +4,7 @@
     <RoxVersion>$(VersionPrefix)-*</RoxVersion>
     <PackageVersion>$(Version)</PackageVersion>
     <LastVersion>*</LastVersion>
-    <AspNetCoreVersion>2.0.0</AspNetCoreVersion>
+    <AspNetCoreVersion>2.1.0-*</AspNetCoreVersion>
     <SystemVersion>4.3.0</SystemVersion>
     
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>

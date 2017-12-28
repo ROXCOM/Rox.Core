@@ -31,7 +31,7 @@ namespace Rox.Core
         public static bool RegexPattern(this Assembly assembly, string pattern)
         {
             var regex = new Regex(pattern);
-            return regex.IsMatch(assembly.FullName);
+            return regex.IsMatch(assembly.FullName) || regex.IsMatch(assembly.Location);
         }
 
         /// <summary>

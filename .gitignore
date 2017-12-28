@@ -11,3 +11,4 @@ bld/
 [Oo]bj/
 .build/
 artifacts/
+SampleHost/plugins/

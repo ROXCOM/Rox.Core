@@ -11,7 +11,6 @@ namespace Samples
     {
         public static async Task Main(string[] args)
         {
-            //ReflectionHelper.ShowReferences();
             var builder = new HostBuilder()
                 .UseConsoleLifetime()
                 .UseHostedServices(

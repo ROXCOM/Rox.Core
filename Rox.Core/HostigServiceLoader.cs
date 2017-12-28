@@ -1,11 +1,11 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
-using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Runtime.ExceptionServices;
-using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.FileProviders;
@@ -13,48 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Rox.Core
 {
-    public interface IAssemblyResolver
-    {
-        Assembly Resolving(AssemblyLoadContext context, AssemblyName assemblyName);
-    }
-    public class PhysicalAssemblyResolver : IAssemblyResolver
-    {
-        private IEnumerable<Func<AssemblyName, string>> paths = new List<Func<AssemblyName, string>>()
-        {
-            (assemblyName) => Path.Combine(Directory.GetCurrentDirectory(), assemblyName.Name, (assemblyName.Version?.ToString() ?? "")),
-            (assemblyName) => Path.Combine(Directory.GetCurrentDirectory(), assemblyName.Name),
-            (assemblyName) => Path.Combine(Environment.GetEnvironmentVariable("NUGET_PACKAGES") ?? "", assemblyName.Name, (assemblyName.Version?.ToString() ?? "")),
-
-            (assemblyName) => Path.Combine(Environment.GetEnvironmentVariable("NUGET_PACKAGES") ?? "", assemblyName.Name, (assemblyName.Version?.ToString() ?? "")),
-            (assemblyName) => Path.Combine(Environment.GetEnvironmentVariable("NUGET_PACKAGES") ?? "", assemblyName.Name),
-            (assemblyName) => Path.Combine(Environment.GetEnvironmentVariable("USERPROFILE") ?? "", ".nuget", "packages", assemblyName.Name, (assemblyName.Version?.ToString() ?? "")),
-            (assemblyName) => Path.Combine(Environment.GetEnvironmentVariable("USERPROFILE") ?? "", ".nuget", "packages", assemblyName.Name),
-            (assemblyName) => Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? "", ".nuget", "packages", assemblyName.Name, (assemblyName.Version?.ToString() ?? "")),
-            (assemblyName) => Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? "", ".nuget", "packages", assemblyName.Name)
-        };
-        public IEnumerable<Func<AssemblyName, string>> Paths => paths;
-
-        public Assembly Resolving(AssemblyLoadContext context, AssemblyName assemblyName)
-        {
-            foreach (var pathFunc in paths)
-            {
-                var path = pathFunc(assemblyName);
-                if (File.Exists(path))
-                {
-                    var assembly = context.LoadFromAssemblyPath(path);
-                    if (assembly != null)
-                        return assembly;
-                }
-            }
-
-            return null;
-        }
-    }
-
     public static class HostigServiceLoader
     {
-        private static IAssemblyResolver resolver = new PhysicalAssemblyResolver();
-
         public static IHostBuilder UseHostedServices(this IHostBuilder builder, Type type, ILogger logger = null)
         {
             var serviceType = typeof(IHostedService);
@@ -113,66 +73,92 @@ namespace Rox.Core
             if (assembly == null)
                 throw new ArgumentNullException(nameof(assembly));
 
-            var name = assembly.ManifestModule.Name;
-
             try
             {
-                logger?.LogInformation(string.Format(resource.info_UseHostedServices_startScannAssembly, name));
+                logger?.LogInformation(string.Format(resource.info_UseHostedServices_startScannAssembly, assembly.FullName));
 
                 var isCandidateAssembly = false;
-                //Parallel.ForEach(assembly.SearchHostedServiceCandidateTypes(), type =>
-                //{
-                //    builder.UseHostedServices(type);
-                //    isCandidateAssembly = true;
-                //});
-
+                var types = new List<Type>();
                 foreach(var type in assembly.SearchCandidateTypes())
                 {
-                    builder.UseHostedServices(type);
+                    types.Add(type);
                     isCandidateAssembly = true;
-
-                    if (isCandidateAssembly) break;
                 }
 
                 if (isCandidateAssembly)
                 {
-                    var context = AssemblyLoadContext.GetLoadContext(assembly);
-                    foreach(var reference in assembly.GetReferencedAssemblies())
-                    {
-                        var depended = resolver.Resolving(context, reference);
-                        if (depended == null)
-                        {
-                            logger?.LogError($"assembly {reference.FullName} not found");
-                        }
-                        //var path = Path.Combine(Directory.GetCurrentDirectory(), reference.Name);
-                        //context.LoadFromAssemblyPath(path);
-                    }
+                    assembly.LoadDependencies();
+                    foreach(var type in types)
+                        builder.UseHostedServices(type);
+
+                    return builder;
                 }
             }
             catch (Exception ex)
             {
                 var capture = ExceptionDispatchInfo.Capture(ex);
-                logger?.LogError(string.Format(resource.error_UseHostedServices_failedScannAssembly, name, capture.SourceException.Message));
+                logger?.LogError(string.Format(resource.error_UseHostedServices_failedScannAssembly, assembly.FullName, capture.SourceException.Message));
                 capture.Throw(); 
             }
 
             return builder;
         }
 
-        public static IHostBuilder UseHostedServices(this IHostBuilder builder, Stream stream, Func<Assembly, bool> filter = null, ILogger logger = null)
+        private static Assembly Resolving(AssemblyLoadContext context, AssemblyName assemblyName, RoxAssemblyResolver resolver, ILogger logger)
         {
-            var context = AssemblyLoadContext.Default;//new IndividualAssemblyLoadContext();
-            context.Resolving += resolver.Resolving;
-            var assembly = context.LoadFromStream(stream);
-            if (assembly.IsSystemLibrary() || (filter != null && !filter.Invoke(assembly)))
+            logger?.LogInformation($"Find path '{assemblyName.FullName}'");
+            string assemblyPath = resolver.GetAssemblyPath(assemblyName);
+
+            if (!string.IsNullOrWhiteSpace(assemblyPath))
             {
-                logger?.LogInformation(string.Format(resource.info_UseHostedServices_assembliesFiltered, assembly.FullName));
-                return builder;
+                try
+                {
+                    logger?.LogDebug($"Trying to load from '{assemblyPath}'");
+                    var assembly = context.LoadFromAssemblyPath(assemblyPath);
+
+                    if (assembly != null)
+                    {
+                        logger?.LogDebug($"Successfully resolved assembly to '{assemblyPath}'");
+                        return assembly;
+                    }
+                }
+
+                catch (Exception e)
+                {
+                    logger?.LogDebug($"Error trying to load '{assemblyName.FullName}': {e.Message}{Environment.NewLine}{e.StackTrace}");
+
+                    if (e.InnerException != null)
+                    {
+                        logger?.LogDebug($"Inner exception: {e.InnerException.Message}{Environment.NewLine}{e.InnerException.StackTrace}");
+                    }
+                }
+            }
+            else
+            {
+                logger?.LogError($"This '{assemblyName.FullName}' is not found");
             }
 
-            return builder.UseHostedServices(assembly);
+            return null;
         }
 
+        private static void LoadDependencies(this Assembly assembly)
+        {
+            var referecnes = assembly.GetReferencedAssemblies();
+            var info = new FileInfo(assembly.Location);
+            var resolver = new RoxAssemblyResolver(new RoxRuntimeEnvironment(
+                ApplicationDirectory: info.DirectoryName,
+                DependencyManifestFile: Path.Combine(info.DirectoryName, assembly.GetName().Name) + ".deps.json"
+            ));
+
+            var context = AssemblyLoadContext.GetLoadContext(assembly);
+            context.Resolving += (c, n) => Resolving(c, n, resolver, logger: null);
+
+            foreach (var reference in referecnes)
+            {
+                context.LoadFromAssemblyName(reference);
+            }
+        }
+        
         public static IHostBuilder UseHostedServices(this IHostBuilder builder, IFileInfo info, Func<Assembly, bool> filter = null, ILogger logger = null)
         {
             if (info == null)
@@ -183,22 +169,25 @@ namespace Rox.Core
             if (info.Exists && !info.IsDirectory)
             {
                 logger?.LogDebug(string.Format(resource.debug_UseHostedServices_assemblyFileInfo, info.Name, info.PhysicalPath));
-                using (var stream = info.CreateReadStream())
+                var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(info.PhysicalPath);
+                if (assembly.IsSystemLibrary() || (filter != null && !filter.Invoke(assembly)))
                 {
-                    logger?.LogDebug(string.Format(resource.debug_UseHostedServices_assemblyFileInfo, info.Name, info.PhysicalPath));
-                    try
-                    {
-                        builder.UseHostedServices(stream, filter: filter, logger: logger);
-                        logger?.LogInformation(string.Format(resource.info_UseHostedServices_assemblyLoadSuccess, info.Name, info.PhysicalPath));
-                    }
-                    catch (BadImageFormatException)
-                    {
-                        logger?.LogWarning(string.Format(resource.warning_UseHostedServices_exists, info.Name, info.PhysicalPath));
-                    }
-                    catch(Exception e)
-                    {
-                        throw new InvalidOperationException(string.Format(resource.error_UseHostedServices_exceptionLoadAssembly, info.Name, info.PhysicalPath, e.Message, e.GetType().FullName), e);
-                    }
+                    logger?.LogInformation(string.Format(resource.info_UseHostedServices_assembliesFiltered, assembly.FullName));
+                    return builder;
+                }
+
+                try
+                {
+                    builder.UseHostedServices(assembly, logger: logger);
+                    logger?.LogInformation(string.Format(resource.info_UseHostedServices_assemblyLoadSuccess, info.Name, info.PhysicalPath));
+                }
+                catch (BadImageFormatException)
+                {
+                    logger?.LogWarning(string.Format(resource.warning_UseHostedServices_exists, info.Name, info.PhysicalPath));
+                }
+                catch(Exception e)
+                {
+                    throw new InvalidOperationException(string.Format(resource.error_UseHostedServices_exceptionLoadAssembly, info.Name, info.PhysicalPath, e.Message, e.GetType().FullName), e);
                 }
             }
             else
