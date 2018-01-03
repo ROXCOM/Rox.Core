@@ -17,19 +17,16 @@ namespace SamplePlugin
             this.logger = loggerFactory.CreateLogger<MyServiceD>();
             this.logger.LogInformation("MyServiceD is starting.");
             _backgroundTask = BackgroundTask();
+            throw new Exception();
             return Task.CompletedTask;
         }
 
         private async Task BackgroundTask()
         {
-            var counter = 0;
             while (!_stopping)
             {
                 await Task.Delay(TimeSpan.FromSeconds(1));
                 logger.LogInformation("MyServiceD is doing background work.");
-                counter++;
-                if (counter > 10)
-                    throw new DivideByZeroException("тестирование");
             }
 
             logger.LogInformation("MyServiceD background task is stopping.");

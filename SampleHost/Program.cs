@@ -12,11 +12,12 @@ namespace Samples
         public static async Task Main(string[] args)
         {
             var builder = new HostBuilder()
-                .UseConsoleLifetime()
-                .UseHostedServices(
-                    new PhysicalFileProvider(Directory.GetCurrentDirectory())
-                    , filterAssembly: assembly => assembly.RegexPattern("Sample.*")
-                );
+                .UseHostedServices()
+                .UseAssemblies(
+                    new PhysicalFileProvider(Directory.GetCurrentDirectory()),
+                    filterAssembly: assembly => assembly.RegexPattern("Sample.*")
+                )
+                .UseConsoleLifetime();
 
             await builder.RunConsoleAsync();
 
