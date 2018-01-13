@@ -17,7 +17,6 @@ namespace SamplePlugin
             this.logger = loggerFactory.CreateLogger<MyServiceD>();
             this.logger.LogInformation("MyServiceD is starting.");
             _backgroundTask = BackgroundTask();
-            throw new Exception();
             return Task.CompletedTask;
         }
 

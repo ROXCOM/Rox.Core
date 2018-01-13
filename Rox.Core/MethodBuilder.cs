@@ -6,9 +6,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Rox.Core
 {
-    public class StartBuilder
+    public class MethodBuilder
     {
-        public StartBuilder(MethodInfo configure)
+        public MethodBuilder(MethodInfo configure)
         {
             this.MethodInfo = configure ?? throw new ArgumentNullException(nameof(configure));
         }

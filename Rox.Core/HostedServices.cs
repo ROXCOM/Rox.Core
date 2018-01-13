@@ -20,10 +20,11 @@ namespace Rox.Core
 {
     public interface IHostedServicesCandidates
     {
+        //IEnumerable<Type> CandidateTypes();
         IEnumerable<IHostedService> Create();
     }
 
-    public class HostedServices : IHostedService
+    public class HostedServices : ConcurrentDictionary<int, IHostedService>, IHostedService
     {
         public IList<IHostedServicesCandidates> Templates { get; }
         private ILogger logger;
@@ -88,7 +89,6 @@ namespace Rox.Core
 
                     tocken.ThrowIfCancellationRequested();
                 }
-
             }
             catch (OperationCanceledException e)
             {
@@ -105,9 +105,8 @@ namespace Rox.Core
             {
                 this.services.AddRange(template.Create());
             }
-
-
         }
+
         private async Task Uninitialize(CancellationToken tocken)
         {
 
@@ -126,6 +125,11 @@ namespace Rox.Core
 
         public IncludeTypeRule(IServiceProvider provider, IEnumerable<Type> types) { this.provider = provider; this.types = types; }
         public IncludeTypeRule(IServiceProvider provider, params Type[] types) { this.provider = provider; this.types = types; }
+
+        public IEnumerable<Type> CandidateTypes()
+        {
+            return types;
+        }
 
         public IEnumerable<IHostedService> Create()
         {
@@ -222,8 +226,8 @@ namespace Rox.Core
                     var methodInfos = type.SearchHostedServiceCandidateMethods();
                     if (methodInfos.IsCandidateMethods())
                     {
-                        var startMethod = new StartBuilder(methodInfos.Item1);
-                        var stopMethod = new StopBuilder(methodInfos.Item2);
+                        var startMethod = new MethodBuilder(methodInfos.Item1);
+                        var stopMethod = new MethodBuilder(methodInfos.Item2);
 
                         // иначе необходимо произвести конвертацию найденного класса в класс реализующий интерфейс IHostedService
                         var instance = ActivatorUtilities.GetServiceOrCreateInstance(sp, type);
