@@ -37,6 +37,8 @@ namespace Rox.Core
             this.Templates = templates.ToList();
             this.logger = loggerFactory.CreateLogger<HostedServices>();
             this.timer = new Timer(Timer, this.services, 0, 5000);
+
+            Initialize();
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -99,7 +101,7 @@ namespace Rox.Core
             }
         }
 
-        private async Task Initialize(CancellationToken tocken)
+        private void Initialize()
         {
             foreach(var template in Templates)
             {
@@ -226,13 +228,47 @@ namespace Rox.Core
                     var methodInfos = type.SearchHostedServiceCandidateMethods();
                     if (methodInfos.IsCandidateMethods())
                     {
-                        var startMethod = new MethodBuilder(methodInfos.Item1);
-                        var stopMethod = new MethodBuilder(methodInfos.Item2);
+                        return Activator.CreateInstance(typeof(ConventionBased).CreateType<IHostedService>(), type, sp) as IHostedService;
+                    }
+                    else
+                    {
+                        logger?.LogInformation(string.Format(resource.info_UseHostedServices_notFoundSutibleMethods, serviceType.FullName));
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                logger.LogError($"chek type and create instant '{type.FullName}' failed. error '{e.Message}'");
+            }
+            return null;
+        }
+
+        public static Instance CreateOrNull<Instance>(this Type type, IServiceProvider sp, ILogger logger = null)
+            where Instance: class
+        {
+            var serviceType = typeof(Instance);
+            try
+            {
+                // если интерфейс реализован явно, то класс добавляется как реализация интерфейса IHostedService
+                if (serviceType.IsAssignableFrom(type))
+                {
+                    logger?.LogInformation(string.Format(resource.info_UseHostedServices_typeAssignableInterface, type.FullName, serviceType.FullName));
+                    return ActivatorUtilities.GetServiceOrCreateInstance(sp, type) as Instance;
+                }
+                else
+                {
+                    logger?.LogInformation(string.Format(resource.info_UseHostedServices_typeNotAssignableInterface, type.FullName, serviceType.FullName));
+
+                    var methodInfos = type.SearchHostedServiceCandidateMethods();
+                    if (methodInfos.IsCandidateMethods())
+                    {
+                        var startMethod = new MethodProxy(methodInfos.Item1);
+                        var stopMethod = new MethodProxy(methodInfos.Item2);
 
                         // иначе необходимо произвести конвертацию найденного класса в класс реализующий интерфейс IHostedService
                         var instance = ActivatorUtilities.GetServiceOrCreateInstance(sp, type);
                         var methods = new HostingServiceMethods(instance, startMethod.Build(instance, sp), stopMethod.Build(instance, sp));
-                        return new ConventionBasedHostingService(methods);
+                        return new ConventionBasedType(methods).Create<Instance>();
                     }
                     else
                     {
@@ -349,8 +385,6 @@ namespace Rox.Core
                     {
                         var subPath = Path.Combine(directoryOrFilePath, content.Name);
                         logger?.LogInformation(resource.info_UseHostedServices_scaningSubPath, subPath);
-
-
 
                         hosted.AddRange(fileProvider.CreateOrNull(provider, subPath, includeSubfolder: includeSubfolder, filterInfo: filterInfo, filterAssembly: filterAssembly, logger: logger));
                     }

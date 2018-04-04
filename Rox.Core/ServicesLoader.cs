@@ -17,7 +17,7 @@ namespace Rox.Core
         /// <param name="environmentName">Используется для поиска названия метода с учетом переменной среды. К примеру если передан methodName: Start{0}Async, а environmentName: Development. то в таком случае поииску подлежат 2 метода: StartDevelopmentAsync (в первую очередь) и StartAsync во вторую очередь</param>
         /// <param name="returnType">Если указано, то производиться поиск метода, который имеет возвращаемый тип с указанного типа. Если не указано, то будет найден метод, с любым возвращаемым типом</param>
         /// <returns></returns>
-        private static IList<MethodInfo> FindMethods(this Type type, string methodName, string environmentName = "", Type returnType = null)
+        public static IEnumerable<MethodInfo> FindMethods(this Type type, string methodName, string environmentName = "", Type returnType = null)
         {
             if (type == null)
                 throw new ArgumentNullException(nameof(type));
@@ -46,12 +46,30 @@ namespace Rox.Core
                     .Where(method => (returnType == null) || (returnType != null && method.ReturnType.FullName.Equals(returnType.FullName, StringComparison.InvariantCulture)))
                     .ToList();
             }
+
             if (selectedMethods.Count == 0)
-            {
                 return null;
-            }
 
             return selectedMethods;
+        }
+
+        /// <summary>
+        /// Производит поиск методов с указанным именем methodName
+        /// Если указан environmentName, то в первую очередь птается найти метод с именем "methodName{environmentName}", потом "methodName"
+        /// Если не найден метод с именем methodName, то производиться поиск асинхронного метода с именем "methodNameAsync"
+        /// Если тип возвращаемого значения не указан, то производиться поиск метода с возвращаемым типом "Task" и далее "Void"
+        /// </summary>
+        /// <param name="type">Тип в котором производиться поиск методов</param>
+        /// <param name="environmentName">Опционально. Если указано значение, то в приоритете производиться поиск метода, в котором присутствует в названии указанная строка в следующем виде: "methodName + {environmentName}"</param>
+        /// <returns>MethodInfo если найден подходящий метод. null, если подходящий метод не найден</returns>
+        private static IEnumerable<MethodInfo> FindIncludingAsyncMethods(this Type type, string methodName, string environmentName = "", Type returnType = null)
+        {
+            // Если не найдены методы текущего FindMethods, то проверяется следующий
+            return
+                FindMethods(type, methodName + "{0}Async", environmentName, returnType: returnType ?? typeof(Task)) ??
+                FindMethods(type, methodName + "{0}", environmentName, returnType: returnType ?? typeof(Task)) ??
+                FindMethods(type, methodName + "{0}Async", environmentName, returnType ?? typeof(void)) ??
+                FindMethods(type, methodName + "{0}", environmentName, returnType ?? typeof(void));
         }
 
         /// <summary>
@@ -103,6 +121,36 @@ namespace Rox.Core
                 type.FindStartMethods(environmentName)?.FirstOrDefault(),
                 type.FindStopMethods(environmentName)?.FirstOrDefault()
             );
+        }
+
+        public static IDictionary<MethodInfo, IEnumerable<MethodInfo>> FindMethods(this Type inType, Type protoType, string environmentName = "")
+        {
+            if (inType == null)
+                throw new ArgumentNullException(nameof(inType));
+            if (protoType == null)
+                throw new ArgumentNullException(nameof(protoType));
+
+            var result = new Dictionary<MethodInfo, IEnumerable<MethodInfo>>();
+            var methods = protoType.GetTypeInfo().DeclaredMethods.Where(p => p.IsPublic);
+            foreach(var methodForSearch in methods)
+            {
+                var returnType = methodForSearch.ReturnType;
+                if (methodForSearch.ReturnType == typeof(void) || methodForSearch.ReturnType == typeof(Task))
+                    returnType = null;
+
+                var name = methodForSearch.Name;
+                if (name.EndsWith("Async", StringComparison.OrdinalIgnoreCase) && !name.Equals("Async", StringComparison.OrdinalIgnoreCase))
+                    name = name.Split("Async").First();
+
+                result.Add(methodForSearch, inType.FindIncludingAsyncMethods(name, environmentName, returnType));
+            }
+
+            return result;
+        }
+
+        public static string Info(this MethodInfo info)
+        {
+            return $"{info.ReturnType.FullName} {info.Name}({string.Join(", ", info.GetParameters().OrderBy(p => p.Position).Select(p => $"{p.ParameterType} {p.Name}"))})";
         }
 
         public static bool IsCandidateMethods(this (MethodInfo, MethodInfo) p) =>

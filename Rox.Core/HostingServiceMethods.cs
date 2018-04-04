@@ -1,20 +1,20 @@
 ﻿using System;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 
 namespace Rox.Core
 {
-    public class HostingServiceMethods
+    public class HostingServiceMethods : LinkedList<FuncParams<object>>
     {
-        public HostingServiceMethods(object instance, Func<CancellationToken, Task> start, Func<CancellationToken, Task> stop)
+        public HostingServiceMethods(object instance, params FuncParams<object>[] delegates)
         {
             Instance = instance;
-            StartDelegate = start;
-            StopDelegate  = stop;
+            Delegates = new LinkedList<FuncParams<object>>(delegates);
         }
 
         private object Instance { get; }
-        public Func<CancellationToken, Task> StartDelegate { get; }
-        public Func<CancellationToken, Task> StopDelegate { get; }
+        public LinkedList<FuncParams<object>> Delegates { get; }
     }
 }
